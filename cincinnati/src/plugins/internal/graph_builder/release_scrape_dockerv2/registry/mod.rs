@@ -38,6 +38,7 @@ use std::time::Duration;
 use tar::Archive;
 use tokio::time::sleep;
 use url::Url;
+use std::env;
 
 use dkregistry::mediatypes::MediaTypes::{ManifestList, ManifestV2S1Signed, ManifestV2S2};
 use dkregistry::v2::Client;
@@ -256,6 +257,31 @@ async fn get_manifest_layers(
     registry_client: &Client,
 ) -> Result<(Option<String>, String, Vec<String>), Error> {
     trace!("[{}] Fetching release", tag);
+
+    if !tag.starts_with("sha256:") {
+
+        // Extract the version from the tag (before suffixes like -rc.2 or -s390x)
+        let version_str = tag
+            .split('-')
+            .next()
+            .ok_or_else(|| format_err!("invalid tag format: {}", tag))?;
+        let version = Version::parse(version_str)
+            .map_err(|e| format_err!("failed to parse version from tag {}: {}", tag, e))?;
+
+        // Read the minimum version from the environment variable MIN_VERSION, by default 4.17.0
+        let min_version_str = env::var("MIN_VERSION").unwrap_or_else(|_| String::from("4.17.0"));
+        let min_version = Version::parse(&min_version_str)
+            .map_err(|e| format_err!("failed to parse MIN_VERSION {}: {}", min_version_str, e))?;
+
+        if version < min_version {
+            error!("skip unsupported version: {}", tag);
+            return Err(format_err!("version {} is earlier than 4.17", tag));
+        }
+
+    } else {
+        trace!("Skipping version validation for tag with sha256: {}", tag);
+    }
+
     let (tag, manifest, manifestref) =
         get_manifest_and_ref(tag, repo.to_owned(), &registry_client).await?;
 
